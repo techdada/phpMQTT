@@ -49,6 +49,7 @@ class phpMQTT {
 	public $will;				/* stores the will of the client */
 	private $username;			/* stores username */
 	private $password;			/* stores password */
+	private $tls_prot;			/* stores tls protocol to use */
 
 	public $cafile;
 
@@ -57,11 +58,12 @@ class phpMQTT {
 	}
 
 	/* sets the broker details */
-	function broker($address, $port, $clientid, $cafile = NULL){
+	function broker($address, $port, $clientid, $cafile = NULL, $tls_prot = 'tls'){
 		$this->address = $address;
 		$this->port = $port;
 		$this->clientid = $clientid;
 		$this->cafile = $cafile;
+		$this->tls_prot = $tls_prot;
 	}
 
 	function connect_auto($clean = true, $will = NULL, $username = NULL, $password = NULL){
@@ -85,7 +87,7 @@ class phpMQTT {
 				"verify_peer_name" => true,
 				"cafile" => $this->cafile
 				]]);
-			$this->socket = stream_socket_client("tls://" . $this->address . ":" . $this->port, $errno, $errstr, 60, STREAM_CLIENT_CONNECT, $socketContext);
+			$this->socket = stream_socket_client($this->tls_prot . "://" . $this->address . ":" . $this->port, $errno, $errstr, 60, STREAM_CLIENT_CONNECT, $socketContext);
 		} else {
 			$this->socket = stream_socket_client("tcp://" . $this->address . ":" . $this->port, $errno, $errstr, 60, STREAM_CLIENT_CONNECT);
 		}
