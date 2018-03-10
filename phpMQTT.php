@@ -53,8 +53,8 @@ class phpMQTT {
 
 	public $cafile;
 
-	function __construct($address, $port, $clientid, $cafile = NULL){
-		$this->broker($address, $port, $clientid, $cafile);
+	function __construct($address, $port, $clientid, $cafile = NULL, $tls_prot = 'tls'){
+		$this->broker($address, $port, $clientid, $cafile, $tls_prot);
 	}
 
 	/* sets the broker details */
