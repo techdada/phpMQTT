@@ -1,7 +1,6 @@
 <?php
 
 namespace techdada;
-
 /*
  	phpMQTT
 	A simple php class to connect/publish/subscribe to an MQTT broker
@@ -39,10 +38,11 @@ class phpMQTT {
 
 	private $socket; 			/* holds the socket	*/
 	private $msgid = 1;			/* counter for message id */
-	public $keepalive = 10;		/* default keepalive timmer */
-	public $timesinceping;		/* host unix time, used to detect disconects */
+	private $keepalive = 60;		/* default keepalive timmer */
+	private $timesinceping;		/* host unix time, used to detect disconects */
+	private $pingstatus = 0;		/* To prevent ping sent to often */
 	public $topics = array(); 	/* used to store currently subscribed topics */
-	public $debug = false;		/* should output debug messages */
+	public $debug = true;		/* should output debug messages */
 	public $address;			/* broker address */
 	public $port;				/* broker port */
 	public $clientid;			/* client id sent to brocker */
@@ -50,6 +50,7 @@ class phpMQTT {
 	private $username;			/* stores username */
 	private $password;			/* stores password */
 	private $tls_prot;			/* stores tls protocol to use */
+	private $topichistory = array();	/* stores topics with there values to see if value has changed before sending again */
 
 	public $cafile;
 
@@ -64,6 +65,11 @@ class phpMQTT {
 		$this->clientid = $clientid;
 		$this->cafile = $cafile;
 		$this->tls_prot = $tls_prot;
+	}
+
+	function getsocket()
+	{
+		return $this->socket;
 	}
 
 	function connect_auto($clean = true, $will = NULL, $username = NULL, $password = NULL){
@@ -99,6 +105,8 @@ class phpMQTT {
 
 		stream_set_timeout($this->socket, 5);
 		stream_set_blocking($this->socket, 0);
+		
+		$this->pingstatus = 0;
 
 		$i = 0;
 		$buffer = "";
@@ -130,8 +138,8 @@ class phpMQTT {
 		$buffer .= chr($var); $i++;
 
 		//Keep alive
-		$buffer .= chr($this->keepalive >> 8); $i++;
-		$buffer .= chr($this->keepalive & 0xff); $i++;
+		$buffer .= chr(($this->keepalive * 2) >> 8); $i++;
+		$buffer .= chr(($this->keepalive * 2) & 0xff); $i++;
 
 		$buffer .= $this->strwritestring($this->clientid,$i);
 
@@ -154,15 +162,19 @@ class phpMQTT {
 	 	$string = $this->read(4);
 
 		if(ord($string{0})>>4 == 2 && $string{3} == chr(0)){
-			if($this->debug) echo "Connected to Broker\n"; 
+			if($this->debug) echo "Connected to MQTT broker\n"; 
+			foreach ($this->topichistory as $key => $value)
+			{
+				if ($value["retain"]) $this->publish($key, $value["msg"] , $value["qos"], 1);
+			}
 		}else{	
-			error_log(sprintf("Connection failed! (Error: 0x%02x 0x%02x)\n", 
+			error_log(sprintf("Connection to MQTT broker failed! (Error: 0x%02x 0x%02x)\n", 
 			                        ord($string{0}),ord($string{3})));
 			return false;
 		}
 
 		$this->timesinceping = time();
-
+		$this->topichistory = array();
 		return true;
 	}
 
@@ -173,6 +185,8 @@ class phpMQTT {
 		
 		$string="";
 		$togo = $int;
+		
+		if (!$this->socket) return "";  
 		
 		if($nb){
 			return fread($this->socket, $togo);
@@ -192,32 +206,27 @@ class phpMQTT {
 
 	/* subscribe: subscribes to topics */
 	function subscribe($topics, $qos = 0){
-		$i = 0;
-		$buffer = "";
-		$id = $this->msgid;
-		$buffer .= chr($id >> 8);  $i++;
-		$buffer .= chr($id % 256);  $i++;
-
 		foreach($topics as $key => $topic){
+			$i = 0;
+			$buffer = "";
+			$id = $this->msgid;
+			$buffer .= chr($id >> 8);  $i++;
+			$buffer .= chr($id % 256);  $i++;
 			$buffer .= $this->strwritestring($key,$i);
 			$buffer .= chr($topic["qos"]);  $i++;
 			$this->topics[$key] = $topic; 
+		
+			$cmd = 0x80;
+			//$qos
+			$cmd +=	($qos << 1);
+
+			$head = chr($cmd);
+			$head .= chr($i);
+		
+			fwrite($this->socket, $head, 2);
+			fwrite($this->socket, $buffer, $i);
+			fflush($this->socket);
 		}
-
-		$cmd = 0x80;
-		//$qos
-		$cmd +=	($qos << 1);
-
-
-		$head = chr($cmd);
-		$head .= chr($i);
-		
-		fwrite($this->socket, $head, 2);
-		fwrite($this->socket, $buffer, $i);
-		$string = $this->read(2);
-		
-		$bytes = ord(substr($string,1,1));
-		$string = $this->read($bytes);
 	}
 
 	/* ping: sends a keep alive ping */
@@ -225,8 +234,11 @@ class phpMQTT {
 			$head = " ";
 			$head = chr(0xc0);		
 			$head .= chr(0x00);
-			fwrite($this->socket, $head, 2);
-			if($this->debug) echo "ping sent\n";
+			if ($this->socket)
+			{
+				fwrite($this->socket, $head, 2);
+				if($this->debug) echo "ping sent\n";
+			}
 	}
 
 	/* disconnect: sends a proper disconect cmd */
@@ -234,7 +246,10 @@ class phpMQTT {
 			$head = " ";
 			$head{0} = chr(0xe0);		
 			$head{1} = chr(0x00);
-			fwrite($this->socket, $head, 2);
+                        if ($this->socket)
+                        {
+				fwrite($this->socket, $head, 2);
+			}
 	}
 
 	/* close: sends a proper disconect, then closes the socket */
@@ -245,6 +260,9 @@ class phpMQTT {
 
 	/* publish: publishes $content on a $topic */
 	function publish($topic, $content, $qos = 0, $retain = 0){
+
+		if($this->debug) echo ("Publishing ".$topic."=".$content."\n");
+               	$this->topichistory[$topic] = array("msg"=>$content, "qos"=>$qos, "retain"=>$retain);
 
 		$i = 0;
 		$buffer = "";
@@ -271,10 +289,24 @@ class phpMQTT {
 		$head{0} = chr($cmd);		
 		$head .= $this->setmsglength($i);
 
-		fwrite($this->socket, $head, strlen($head));
-		fwrite($this->socket, $buffer, $i);
+		if ($this->socket) 
+		{
+			fwrite($this->socket, $head, strlen($head));
+			fwrite($this->socket, $buffer, $i);
+		}
 
 	}
+	
+	/* publishwhenchanged: only publish if value has changed */
+	function publishwhenchanged($topic, $msg, $qos = 0, $retain = 0)
+	{
+        	if (!isset($this->topichistory[$topic]) || ($this->topichistory[$topic]["msg"] != $msg))
+        	{
+                	$this->publish($topic, $msg, $qos, $retain);
+		}
+		else if($this->debug) echo ("Not publishing ".$topic."=".$msg." because message is the same as published earlier...\n");
+	}
+
 
 	/* message: processes a recieved topic */
 	function message($msg){
@@ -308,12 +340,14 @@ class phpMQTT {
 			$cmd = 0;
 			
 				//$byte = fgetc($this->socket);
-			if(feof($this->socket)){
+			if ($this->socket) if(feof($this->socket)){
 				if($this->debug) echo "eof receive going to reconnect for good measure\n";
 				fclose($this->socket);
-				$this->connect_auto(false);
-				if(count($this->topics))
-					$this->subscribe($this->topics);	
+				if($this->connect(false)) if(count($this->topics)) $this->subscribe($this->topics);	
+			}
+
+			if (!$this->socket){
+				if($this->connect(false)) if(count($this->topics)) $this->subscribe($this->topics);	
 			}
 			
 			$byte = $this->read(1, true);
@@ -346,24 +380,33 @@ class phpMQTT {
 						case 3:
 							$this->message($string);
 						break;
+						case 13:
+							if ($this->debug) echo "PING: Reply received!\n";
+							$this->timesinceping = time();
+							$this->pingstatus = 0;
+						break;
 					}
 
-					$this->timesinceping = time();
 				}
 			}
 
-			if($this->timesinceping < (time() - $this->keepalive )){
-				if($this->debug) echo "not found something so ping\n";
-				$this->ping();	
+			if(($this->pingstatus == 0) && ($this->timesinceping < (time() - $this->keepalive))){
+				if($this->debug) echo "PING: First request send!\n";
+				$this->ping();
+				$this->pingstatus = 1;
+			}
+
+			if(($this->pingstatus == 1) && ($this->timesinceping < (time() - ($this->keepalive * 1.5)))){
+				if($this->debug) echo "PING: Second request send!\n";
+				$this->ping();
+				$this->pingstatus = 2;
 			}
 			
 
-			if($this->timesinceping<(time()-($this->keepalive*2))){
-				if($this->debug) echo "not seen a package in a while, disconnecting\n";
-				fclose($this->socket);
-				$this->connect_auto(false);
-				if(count($this->topics))
-					$this->subscribe($this->topics);
+			if($this->timesinceping<(time()-($this->keepalive * 2))){
+				if($this->debug) echo "PING: Timeout! Reply not received in time, reconnecting\n";
+				if ($this->socket) fclose($this->socket);
+				if ($this->connect(false)) if(count($this->topics)) $this->subscribe($this->topics);
 			}
 
 		}
