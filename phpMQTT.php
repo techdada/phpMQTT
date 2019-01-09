@@ -39,10 +39,10 @@ class phpMQTT {
 	private $socket; 			/* holds the socket	*/
 	private $msgid = 1;			/* counter for message id */
 	private $keepalive = 60;		/* default keepalive timmer */
-	private $timesinceping;		/* host unix time, used to detect disconects */
+	private $timesinceping;			/* host unix time, used to detect disconects */
 	private $pingstatus = 0;		/* To prevent ping sent to often */
-	public $topics = array(); 	/* used to store currently subscribed topics */
-	public $debug = true;		/* should output debug messages */
+	public $topics = array(); 		/* used to store currently subscribed topics */
+	public $debug = false;			/* should output debug messages */
 	public $address;			/* broker address */
 	public $port;				/* broker port */
 	public $clientid;			/* client id sent to brocker */
@@ -216,7 +216,7 @@ class phpMQTT {
 			$buffer .= chr($topic["qos"]);  $i++;
 			$this->topics[$key] = $topic; 
 		
-			$cmd = 0x80;
+			$cmd = 0x82;
 			//$qos
 			$cmd +=	($qos << 1);
 

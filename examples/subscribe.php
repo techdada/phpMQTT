@@ -1,5 +1,7 @@
 <?php
 
+use techdada\phpMQTT;
+
 require("../phpMQTT.php");
 
 

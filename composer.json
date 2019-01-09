@@ -4,6 +4,10 @@
     "license": "BSD",
     "type": "library",
     "authors": [
+	{
+	    "name": "techdada",
+	    "email": "22725849+techdada@users.noreply.github.com"
+	},
         {
             "name": "Andrew Milsted",
             "email": "andrew@bluerhinos.co.uk"
